@@ -175,26 +175,131 @@ class DocumentParser:
         
         return None
     
+    def extract_location(self, text: str) -> Optional[str]:
+        """Extract location/address from text"""
+        location_patterns = [
+            r'(?:Address|Location|City)[:\s]+([A-Za-z\s,]+(?:,\s*[A-Za-z\s]+)*)',
+            r'([A-Za-z\s]+,\s*[A-Za-z\s]+,\s*\d{5,6})',  # City, State, PIN
+            r'([A-Za-z\s]+,\s*[A-Za-z\s]+)',  # City, State
+            r'(?:Based in|Located in|From)[:\s]+([A-Za-z\s,]+)',
+        ]
+        
+        text_lines = text.split('\n')[:10]  # Check first 10 lines
+        
+        for line in text_lines:
+            line = line.strip()
+            for pattern in location_patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    location = match.group(1).strip()
+                    # Basic validation
+                    if 2 <= len(location) <= 100 and not any(char.isdigit() for char in location[:5]):
+                        return location
+        
+        return None
+    
+    def extract_current_ctc(self, text: str) -> Optional[str]:
+        """Extract current CTC from text"""
+        ctc_patterns = [
+            r'(?:Current\s*CTC|CTC|Salary)[:\s]*(?:Rs\.?\s*|INR\s*|₹\s*)?(\d+(?:\.\d+)?\s*(?:LPA|Lakhs?|L|K|Thousands?)?)',
+            r'(?:Current\s*Package|Package)[:\s]*(?:Rs\.?\s*|INR\s*|₹\s*)?(\d+(?:\.\d+)?\s*(?:LPA|Lakhs?|L|K|Thousands?)?)',
+            r'(?:Earning|Income)[:\s]*(?:Rs\.?\s*|INR\s*|₹\s*)?(\d+(?:\.\d+)?\s*(?:LPA|Lakhs?|L|K|Thousands?)?)',
+        ]
+        
+        text_lower = text.lower()
+        
+        for pattern in ctc_patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            if matches:
+                return matches[0].strip()
+        
+        return None
+    
+    def extract_notice_period(self, text: str) -> Optional[str]:
+        """Extract notice period from text"""
+        notice_patterns = [
+            r'(?:Notice\s*Period|Notice)[:\s]*(\d+\s*(?:days?|weeks?|months?))',
+            r'(?:Available\s*in|Can\s*join\s*in)[:\s]*(\d+\s*(?:days?|weeks?|months?))',
+            r'(?:Serving\s*notice|Notice\s*period)[:\s]*(\d+\s*(?:days?|weeks?|months?))',
+            r'(?:Immediate|Immediately\s*available)',
+        ]
+        
+        text_lower = text.lower()
+        
+        for pattern in notice_patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            if matches:
+                if isinstance(matches[0], str):
+                    return matches[0].strip()
+                else:
+                    return matches[0]
+        
+        # Check for immediate availability
+        if re.search(r'(?:immediate|immediately\s*available)', text_lower):
+            return "Immediate"
+        
+        return None
+    
+    def extract_total_experience(self, text: str) -> Optional[str]:
+        """Extract total years of experience with more detailed patterns"""
+        experience_patterns = [
+            r'(?:Total\s*Experience|Overall\s*Experience)[:\s]*(\d+(?:\.\d+)?\+?\s*(?:years?|yrs?))',
+            r'(\d+(?:\.\d+)?\+?)\s*(?:years?|yrs?)\s*(?:of\s*)?(?:total\s*)?experience',
+            r'(?:Experience|Exp)[:\s]*(\d+(?:\.\d+)?\+?\s*(?:years?|yrs?))',
+            r'(\d+(?:\.\d+)?\+?)\s*(?:years?|yrs?)\s*(?:in\s*(?:the\s*)?(?:field|industry|IT|software))',
+        ]
+        
+        text_lower = text.lower()
+        
+        for pattern in experience_patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            if matches:
+                exp_text = matches[0].strip()
+                # Extract just the number part
+                number_match = re.search(r'(\d+(?:\.\d+)?\+?)', exp_text)
+                if number_match:
+                    return f"{number_match.group(1)} years"
+        
+        return None
+    
+    def split_name(self, full_name: str) -> Tuple[Optional[str], Optional[str]]:
+        """Split full name into first name and last name"""
+        if not full_name:
+            return None, None
+        
+        name_parts = full_name.strip().split()
+        if len(name_parts) == 1:
+            return name_parts[0], None
+        elif len(name_parts) >= 2:
+            first_name = name_parts[0]
+            last_name = ' '.join(name_parts[1:])
+            return first_name, last_name
+        
+        return None, None
+
     def extract_candidate_info(self, text: str) -> Dict[str, Optional[str]]:
-        """Extract candidate information from resume text"""
-        info = {
-            "name": None,
-            "email": None,
-            "phone": None
-        }
-        
-        # Extract email
-        info["email"] = self.extract_email(text)
-        
-        # Extract phone
-        info["phone"] = self.extract_phone(text)
-        
-        # Extract name - try multiple methods
-        info["name"] = (
+        """Extract comprehensive candidate information from resume text"""
+        # Extract full name first
+        full_name = (
             self.extract_name_with_spacy(text) or
             self.extract_name_with_hf(text) or
             self.extract_name_with_patterns(text)
         )
+        
+        # Split name into first and last
+        first_name, last_name = self.split_name(full_name)
+        
+        info = {
+            "name": full_name,
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": self.extract_email(text),
+            "phone": self.extract_phone(text),
+            "location": self.extract_location(text),
+            "current_ctc": self.extract_current_ctc(text),
+            "notice_period": self.extract_notice_period(text),
+            "total_experience": self.extract_total_experience(text)
+        }
         
         return info
     

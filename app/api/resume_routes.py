@@ -14,7 +14,8 @@ from app.schemas.resume import (
     ProcessingStatus,
     SearchRequest,
     SearchResponse,
-    SearchResultItem
+    SearchResultItem,
+    ResumeCardInfo
 )
 from app.services.file_service import file_service
 from app.services.vector_service import vector_service
@@ -303,6 +304,52 @@ def search_resumes(
             total_results=len(result_items),
             search_timestamp=datetime.utcnow()
         )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search/cards", response_model=List[ResumeCardInfo])
+def search_resumes_for_cards(
+    search_request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    """Search for matching resumes and return card-friendly format"""
+    try:
+        # Perform vector search
+        search_results = vector_service.search_similar_resumes(
+            query_text=search_request.job_description,
+            job_role=search_request.job_role,
+            limit=search_request.limit,
+            score_threshold=search_request.similarity_threshold
+        )
+        
+        # Get resume details from database and format for cards
+        card_results = []
+        for result in search_results:
+            resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
+            if resume:
+                # Create card-friendly response
+                card_info = ResumeCardInfo(
+                    id=str(resume.id),
+                    similarity_score=result["similarity_score"],
+                    first_name=resume.candidate_first_name,
+                    last_name=resume.candidate_last_name,
+                    full_name=resume.candidate_name,
+                    location=resume.candidate_location,
+                    total_experience=resume.total_experience,
+                    current_ctc=resume.current_ctc,
+                    notice_period=resume.notice_period,
+                    job_category=resume.job_role,
+                    skills=resume.skills,
+                    filename=resume.filename,
+                    minio_path=resume.minio_path,
+                    upload_timestamp=resume.upload_timestamp,
+                    text_preview=resume.processed_text[:200] if resume.processed_text else None
+                )
+                card_results.append(card_info)
+        
+        return card_results
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

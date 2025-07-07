@@ -121,6 +121,25 @@ class SearchResponse(BaseModel):
     search_timestamp: datetime
 
 
+class ResumeCardInfo(BaseModel):
+    """Simplified resume info for card display"""
+    id: str
+    similarity_score: float
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    location: Optional[str] = None
+    total_experience: Optional[str] = None
+    current_ctc: Optional[str] = None
+    notice_period: Optional[str] = None
+    job_category: Optional[str] = None
+    skills: Optional[List[str]] = None
+    filename: str
+    minio_path: Optional[str] = None
+    upload_timestamp: datetime
+    text_preview: Optional[str] = None
+
+
 class ExplanationRequest(BaseModel):
     job_description_id: int
     resume_id: int
