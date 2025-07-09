@@ -14,38 +14,23 @@ logger = logging.getLogger(__name__)
 class VectorService:
     def __init__(self):
         import os
-        self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-        self.collection_name = "resumes"
+        self.qdrant_url = os.getenv("QDRANT_URL", "http://157.180.44.51:6333")
+        self.collection_name = "employee_profiles"
         self.embedding_model = None
     
     async def initialize_collections(self):
         """Initialize Qdrant collections"""
         try:
-            # Create collection if it doesn't exist
+            # Check if employee_profiles collection exists
             async with httpx.AsyncClient() as client:
-                # Check if collection exists
                 response = await client.get(f"{self.qdrant_url}/collections/{self.collection_name}")
                 
-                if response.status_code == 404:
-                    # Create collection
-                    collection_config = {
-                        "vectors": {
-                            "size": 384,  # all-MiniLM-L6-v2 embedding size
-                            "distance": "Cosine"
-                        }
-                    }
-                    
-                    response = await client.put(
-                        f"{self.qdrant_url}/collections/{self.collection_name}",
-                        json=collection_config
-                    )
-                    
-                    if response.status_code == 200:
-                        logger.info(f"Created Qdrant collection: {self.collection_name}")
-                    else:
-                        logger.error(f"Failed to create collection: {response.text}")
-                else:
+                if response.status_code == 200:
                     logger.info(f"Qdrant collection {self.collection_name} already exists")
+                else:
+                    logger.info(f"Note: {self.collection_name} collection not found on the server")
+                    
+                    # We don't create the collection here as it should be pre-created on the server
         
         except Exception as e:
             logger.error(f"Failed to initialize Qdrant collections: {e}")
@@ -140,7 +125,7 @@ class VectorService:
     
     async def search_resumes(self, query_text: str, job_category: Optional[str] = None, 
                            limit: int = 10, similarity_threshold: float = 0.7) -> List[Dict]:
-        """Search for similar resumes"""
+        """Search for similar resumes in employee_profiles collection"""
         try:
             logger.info(f"Search request: query='{query_text}', category='{job_category}', limit={limit}, threshold={similarity_threshold}")
             
@@ -152,7 +137,9 @@ class VectorService:
             search_request = {
                 "vector": query_embedding,
                 "limit": limit,
-                "score_threshold": similarity_threshold
+                "score_threshold": similarity_threshold,
+                "with_payload": True,  # Include payload in response
+                "with_vector": False   # Don't need vectors in response
             }
             
             # Add filter for job category if specified
@@ -170,42 +157,41 @@ class VectorService:
             
             logger.info(f"Search request payload: {search_request}")
             
-            # Perform search with payload and vectors
-            search_request["with_payload"] = True  # Important: Include payload in response
-            search_request["with_vector"] = False  # Don't need vectors in response
+            results = []
             
+            # Search in employee_profiles collection
             async with httpx.AsyncClient() as client:
+                logger.info(f"Searching in {self.collection_name} collection")
                 response = await client.post(
                     f"{self.qdrant_url}/collections/{self.collection_name}/points/search",
                     json=search_request
                 )
                 
-                logger.info(f"Qdrant response status: {response.status_code}")
-                logger.info(f"Qdrant response: {response.text}")
-                
                 if response.status_code == 200:
-                    results = response.json()
-                    logger.info(f"Raw search results: {results}")
+                    response_data = response.json()
+                    logger.info(f"Found {len(response_data.get('result', []))} results in {self.collection_name}")
                     
                     # Format results
-                    formatted_results = []
-                    for result in results.get("result", []):
+                    for result in response_data.get("result", []):
                         payload = result.get("payload", {})
-                        formatted_results.append({
+                        results.append({
                             "id": result["id"],
                             "similarity_score": result["score"],
-                            "filename": payload.get("filename", "Unknown"),
-                            "job_category": payload.get("job_category", "Unknown"),
-                            "minio_path": payload.get("minio_path", ""),
-                            "upload_timestamp": payload.get("upload_timestamp", ""),
-                            "text_preview": payload.get("text_content", "")[:200] + "..." if payload.get("text_content") else "No preview available"
+                            "collection": self.collection_name,
+                            "name": payload.get("name", "Unknown"),
+                            "email": payload.get("email_id", "Unknown"),
+                            "phone": payload.get("phone_number", "Unknown"),
+                            "location": payload.get("location", "Unknown"),
+                            "skills": payload.get("skills", []),
+                            "experience": payload.get("experience_summary", "Unknown"),
+                            "education": payload.get("qualifications_summary", "Unknown"),
+                            "companies": payload.get("companies_worked_with_duration", [])
                         })
-                    
-                    logger.info(f"Found {len(formatted_results)} matching resumes")
-                    return formatted_results
                 else:
-                    logger.error(f"Search failed: {response.text}")
-                    return []
+                    logger.error(f"Error searching {self.collection_name}: {response.text}")
+            
+            logger.info(f"Returning {len(results)} results from {self.collection_name} collection")
+            return results
         
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -266,6 +252,18 @@ class VectorService:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(f"{self.qdrant_url}/collections")
+                if response.status_code == 200:
+                    # Log available collections
+                    collections = response.json()
+                    collection_names = [col["name"] for col in collections.get("result", {}).get("collections", [])]
+                    logger.info(f"Available Qdrant collections: {collection_names}")
+                    
+                    # Check if our collection exists
+                    if self.collection_name in collection_names:
+                        logger.info(f"Collection {self.collection_name} is available")
+                    else:
+                        logger.warning(f"Collection {self.collection_name} is NOT available")
+                        
                 return response.status_code == 200
         except Exception as e:
             logger.error(f"Qdrant health check failed: {e}")

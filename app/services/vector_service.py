@@ -180,7 +180,7 @@ class VectorService:
         limit: int = 10,
         score_threshold: float = 0.5
     ) -> List[Dict]:
-        """Search for similar resumes"""
+        """Search for similar resumes from employee_profiles collection"""
         # Generate query embedding
         query_embedding = self.generate_embedding(query_text)
         if not query_embedding:
@@ -188,43 +188,90 @@ class VectorService:
         
         results = []
         
-        # Determine which collections to search
-        collections_to_search = []
-        if job_role and job_role in settings.job_roles_list:
-            collections_to_search = [f"resumes_{job_role.lower()}"]
-        else:
-            # Search all resume collections
-            collections_to_search = [
-                f"resumes_{role.lower()}" for role in settings.job_roles_list
-            ]
-        
-        for collection_name in collections_to_search:
-            try:
-                # Check if collection exists
-                collections = self.qdrant_client.get_collections()
-                if not any(col.name == collection_name for col in collections.collections):
-                    continue
-                
-                # Perform search
+        try:
+            # Check if employee_profiles collection exists
+            collections = self.qdrant_client.get_collections()
+            if any(col.name == "employee_profiles" for col in collections.collections):
+                # Perform search on employee_profiles collection
                 search_results = self.qdrant_client.search(
-                    collection_name=collection_name,
+                    collection_name="employee_profiles",
                     query_vector=query_embedding,
                     limit=limit,
                     score_threshold=score_threshold
                 )
                 
-                # Process results
+                # Process results from employee_profiles
                 for result in search_results:
+                    # Extract resume_id from id field if available, otherwise use the point_id
+                    resume_id = result.payload.get("id", result.id)
+                    
+                    # Create a result object with the necessary fields
                     results.append({
-                        "resume_id": result.payload["resume_id"],
-                        "job_role": result.payload["job_role"],
+                        "resume_id": resume_id,
+                        "job_role": result.payload.get("skills", []),  # Use skills as job_role
                         "similarity_score": result.score,
-                        "collection": collection_name,
-                        "point_id": result.id
+                        "collection": "employee_profiles",
+                        "point_id": result.id,
+                        # Additional fields from employee_profiles
+                        "name": result.payload.get("name", "Unknown"),
+                        "email": result.payload.get("email_id", "Unknown"),
+                        "phone": result.payload.get("phone_number", "Unknown"),
+                        "location": result.payload.get("location", "Unknown"),
+                        "skills": result.payload.get("skills", []),
+                        "experience": result.payload.get("experience_summary", "Unknown"),
+                        "education": result.payload.get("qualifications_summary", "Unknown"),
+                        "companies": result.payload.get("companies_worked_with_duration", [])
                     })
+                
+                # If we found results in employee_profiles, return them
+                if results:
+                    # Sort by similarity score and return top results
+                    results.sort(key=lambda x: x["similarity_score"], reverse=True)
+                    return results[:limit]
             
-            except Exception as e:
-                logger.error(f"Error searching collection {collection_name}: {e}")
+            # If employee_profiles doesn't exist or has no results, fall back to original collections
+            if not results:
+                logger.warning("No results found in employee_profiles, falling back to original collections")
+                
+                # Determine which collections to search
+                collections_to_search = []
+                if job_role and job_role in settings.job_roles_list:
+                    collections_to_search = [f"resumes_{job_role.lower()}"]
+                else:
+                    # Search all resume collections
+                    collections_to_search = [
+                        f"resumes_{role.lower()}" for role in settings.job_roles_list
+                    ]
+                
+                for collection_name in collections_to_search:
+                    try:
+                        # Check if collection exists
+                        if not any(col.name == collection_name for col in collections.collections):
+                            continue
+                        
+                        # Perform search
+                        search_results = self.qdrant_client.search(
+                            collection_name=collection_name,
+                            query_vector=query_embedding,
+                            limit=limit,
+                            score_threshold=score_threshold
+                        )
+                        
+                        # Process results
+                        for result in search_results:
+                            results.append({
+                                "resume_id": result.payload["resume_id"],
+                                "job_role": result.payload["job_role"],
+                                "similarity_score": result.score,
+                                "collection": collection_name,
+                                "point_id": result.id
+                            })
+                    
+                    except Exception as e:
+                        logger.error(f"Error searching collection {collection_name}: {e}")
+        
+        except Exception as e:
+            logger.error(f"Error searching employee_profiles collection: {e}")
         
         # Sort by similarity score and return top results
         results.sort(key=lambda x: x["similarity_score"], reverse=True)

@@ -1,67 +1,31 @@
-version: "3.8"
-
 services:
-  # FastAPI Application
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/resume_db
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    depends_on:
-      - postgres
-      - redis
-      - qdrant
-      - minio
-    volumes:
-      - ./app:/app
-      - ./uploads:/uploads
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  # Celery Worker
-  celery-worker:
-    build: .
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/resume_db
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    depends_on:
-      - postgres
-      - redis
-      - qdrant
-      - minio
-    volumes:
-      - ./app:/app
-      - ./uploads:/uploads
-    command: celery -A app.celery_app worker --loglevel=info
-
-  # PostgreSQL Database
+  # Infrastructure Services
   postgres:
     image: postgres:15
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=resume_db
+      POSTGRES_DB: resume_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Redis for Celery
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Qdrant Vector Database
   qdrant:
     image: qdrant/qdrant:latest
     ports:
@@ -69,19 +33,48 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      disable: true
 
-  # MinIO Object Storage
   minio:
     image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
     volumes:
       - minio_data:/data
-    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MVP Application
+  resume-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.mvp
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+      - minio
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/resume_db
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
 
 volumes:
   postgres_data:

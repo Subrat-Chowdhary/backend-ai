@@ -286,17 +286,45 @@ def search_resumes(
             score_threshold=search_request.similarity_threshold
         )
         
-        # Get resume details from database
+        # Get resume details from database or create from employee_profiles data
         result_items = []
         for i, result in enumerate(search_results):
-            resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
-            if resume:
+            # Check if this is from employee_profiles collection
+            if result.get("collection") == "employee_profiles" and "name" in result:
+                # Create a Resume object from employee_profiles data
+                resume_data = {
+                    "id": result.get("resume_id"),
+                    "name": result.get("name", "Unknown"),
+                    "email": result.get("email", ""),
+                    "phone": result.get("phone", ""),
+                    "location": result.get("location", ""),
+                    "skills": ", ".join(result.get("skills", [])),
+                    "experience": result.get("experience", ""),
+                    "education": result.get("education", ""),
+                    "job_title": ", ".join(result.get("companies", []))[:100],  # Use first company as job title
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                
+                # Create a Resume object (without saving to DB)
+                temp_resume = Resume(**resume_data)
+                
                 result_items.append(SearchResultItem(
-                    resume_id=resume.id,
-                    resume=resume,
+                    resume_id=result.get("resume_id"),
+                    resume=temp_resume,
                     similarity_score=result["similarity_score"],
                     rank_position=i + 1
                 ))
+            else:
+                # Traditional resume lookup from database
+                resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
+                if resume:
+                    result_items.append(SearchResultItem(
+                        resume_id=resume.id,
+                        resume=resume,
+                        similarity_score=result["similarity_score"],
+                        rank_position=i + 1
+                    ))
         
         return SearchResponse(
             query=search_request,
@@ -327,27 +355,55 @@ def search_resumes_for_cards(
         # Get resume details from database and format for cards
         card_results = []
         for result in search_results:
-            resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
-            if resume:
-                # Create card-friendly response
+            # Check if this is from employee_profiles collection
+            if result.get("collection") == "employee_profiles" and "name" in result:
+                # Extract first and last name
+                name_parts = result.get("name", "Unknown").split(" ", 1)
+                first_name = name_parts[0] if len(name_parts) > 0 else "Unknown"
+                last_name = name_parts[1] if len(name_parts) > 1 else ""
+                
+                # Create card directly from employee_profiles data
                 card_info = ResumeCardInfo(
-                    id=str(resume.id),
+                    id=str(result.get("resume_id")),
                     similarity_score=result["similarity_score"],
-                    first_name=resume.candidate_first_name,
-                    last_name=resume.candidate_last_name,
-                    full_name=resume.candidate_name,
-                    location=resume.candidate_location,
-                    total_experience=resume.total_experience,
-                    current_ctc=resume.current_ctc,
-                    notice_period=resume.notice_period,
-                    job_category=resume.job_role,
-                    skills=resume.skills,
-                    filename=resume.filename,
-                    minio_path=resume.minio_path,
-                    upload_timestamp=resume.upload_timestamp,
-                    text_preview=resume.processed_text[:200] if resume.processed_text else None
+                    first_name=first_name,
+                    last_name=last_name,
+                    full_name=result.get("name", "Unknown"),
+                    location=result.get("location", "Unknown"),
+                    total_experience=result.get("experience", ""),
+                    current_ctc="",  # Not available in employee_profiles
+                    notice_period="",  # Not available in employee_profiles
+                    job_category=", ".join(result.get("skills", []))[:50] if result.get("skills") else "",
+                    skills=", ".join(result.get("skills", [])) if result.get("skills") else "",
+                    filename=f"{result.get('name', 'profile')}.pdf",
+                    minio_path="",  # Not available in employee_profiles
+                    upload_timestamp=datetime.utcnow(),
+                    text_preview=result.get("experience", "")[:200] if result.get("experience") else None
                 )
                 card_results.append(card_info)
+            else:
+                # Traditional resume lookup from database
+                resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
+                if resume:
+                    # Create card-friendly response
+                    card_info = ResumeCardInfo(
+                        id=str(resume.id),
+                        similarity_score=result["similarity_score"],
+                        first_name=resume.candidate_first_name,
+                        last_name=resume.candidate_last_name,
+                        full_name=resume.candidate_name,
+                        location=resume.candidate_location,
+                        total_experience=resume.total_experience,
+                        current_ctc=resume.current_ctc,
+                        notice_period=resume.notice_period,
+                        job_category=resume.job_role,
+                        skills=resume.skills,
+                        filename=resume.filename,
+                        minio_path=resume.minio_path,
+                        upload_timestamp=resume.upload_timestamp,
+                        text_preview=resume.processed_text[:200] if resume.processed_text else None
+                    )
+                    card_results.append(card_info)
         
         return card_results
     
