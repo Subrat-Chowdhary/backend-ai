@@ -1,0 +1,48 @@
+services:
+  # MinIO for file storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Lightweight Resume API
+  resume-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.light
+    ports:
+      - "8000:8000"
+    depends_on:
+      - minio
+    environment:
+      # External services (your ETL server)
+      - QDRANT_URL=http://157.180.44.51:6333
+      
+      # Local MinIO
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      
+      # Query Enhancement (configurable)
+      - QUERY_ENHANCEMENT_STRATEGY=none  # Change to: openai, anthropic, custom_api
+      - OPENAI_API_KEY=  # Add your key if using OpenAI
+      - ANTHROPIC_API_KEY=  # Add your key if using Anthropic
+      - CUSTOM_ENHANCER_URL=  # Add your custom API URL
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  minio_data:

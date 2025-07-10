@@ -373,12 +373,12 @@ def search_resumes_for_cards(
                     total_experience=result.get("experience", ""),
                     current_ctc="",  # Not available in employee_profiles
                     notice_period="",  # Not available in employee_profiles
-                    job_category=", ".join(result.get("skills", []))[:50] if result.get("skills") else "",
+                    job_category=result.get("current_job_title", "") or (", ".join(result.get("skills", []))[:50] if result.get("skills") else ""),
                     skills=", ".join(result.get("skills", [])) if result.get("skills") else "",
-                    filename=f"{result.get('name', 'profile')}.pdf",
+                    filename=result.get("_original_filename", f"{result.get('name', 'profile')}.pdf"),
                     minio_path="",  # Not available in employee_profiles
                     upload_timestamp=datetime.utcnow(),
-                    text_preview=result.get("experience", "")[:200] if result.get("experience") else None
+                    text_preview=result.get("objective", "") or (result.get("experience", "")[:200] if result.get("experience") else None)
                 )
                 card_results.append(card_info)
             else:

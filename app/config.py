@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Job Role Categories
     job_roles: str = "Backend,Frontend,Database,QA,Fullstack,DevOps,Mobile,DataScience"
     
+    # Query Enhancement Settings
+    query_enhancement_strategy: str = "none"  # none, openai, anthropic, local_llm, custom_api
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    custom_enhancer_url: str = ""
+    
     class Config:
         env_file = ".env"
     

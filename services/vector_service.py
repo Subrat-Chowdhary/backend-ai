@@ -124,13 +124,28 @@ class VectorService:
             raise Exception(f"Vector DB error: {str(e)}")
     
     async def search_resumes(self, query_text: str, job_category: Optional[str] = None, 
-                           limit: int = 10, similarity_threshold: float = 0.7) -> List[Dict]:
+                           limit: int = 10, similarity_threshold: float = 0.7, 
+                           enhance_query: bool = True) -> List[Dict]:
         """Search for similar resumes in employee_profiles collection"""
         try:
             logger.info(f"Search request: query='{query_text}', category='{job_category}', limit={limit}, threshold={similarity_threshold}")
             
+            # Enhance query if enabled
+            final_query = query_text
+            if enhance_query:
+                try:
+                    from .query_enhancer import enhance_search_query
+                    context = {"job_category": job_category} if job_category else None
+                    final_query = await enhance_search_query(query_text, context)
+                    if final_query != query_text:
+                        logger.info(f"Query enhanced: '{query_text}' -> '{final_query}'")
+                except ImportError:
+                    logger.info("Query enhancer not available, using original query")
+                except Exception as e:
+                    logger.warning(f"Query enhancement failed: {e}, using original query")
+            
             # Create query embedding
-            query_embedding = await self.create_embedding(query_text)
+            query_embedding = await self.create_embedding(final_query)
             logger.info(f"Query embedding created, length: {len(query_embedding)}")
             
             # Prepare search request
@@ -179,13 +194,25 @@ class VectorService:
                             "similarity_score": result["score"],
                             "collection": self.collection_name,
                             "name": payload.get("name", "Unknown"),
-                            "email": payload.get("email_id", "Unknown"),
-                            "phone": payload.get("phone_number", "Unknown"),
+                            "email": payload.get("email_id", ""),
+                            "phone": payload.get("phone_number", ""),
                             "location": payload.get("location", "Unknown"),
                             "skills": payload.get("skills", []),
-                            "experience": payload.get("experience_summary", "Unknown"),
-                            "education": payload.get("qualifications_summary", "Unknown"),
-                            "companies": payload.get("companies_worked_with_duration", [])
+                            "experience": payload.get("experience_summary", ""),
+                            "education": payload.get("qualifications_summary", ""),
+                            "companies": payload.get("companies_worked_with_duration", []),
+                            "current_job_title": payload.get("current_job_title", ""),
+                            "objective": payload.get("objective", ""),
+                            "projects": payload.get("projects", []),
+                            "certifications": payload.get("certifications", []),
+                            "awards_achievements": payload.get("awards_achievements", []),
+                            "languages": payload.get("languages", []),
+                            "linkedin_url": payload.get("linkedin_url", ""),
+                            "github_url": payload.get("github_url", ""),
+                            "availability_status": payload.get("availability_status", ""),
+                            "work_authorization_status": payload.get("work_authorization_status", ""),
+                            "has_photo": payload.get("has_photo", False),
+                            "_original_filename": payload.get("_original_filename", "")
                         })
                 else:
                     logger.error(f"Error searching {self.collection_name}: {response.text}")
@@ -268,6 +295,62 @@ class VectorService:
         except Exception as e:
             logger.error(f"Qdrant health check failed: {e}")
             return False
+    
+    def search_similar_resumes(self, query_text: str, job_role: Optional[str] = None, 
+                              limit: int = 10, score_threshold: float = 0.7) -> List[Dict]:
+        """Synchronous wrapper for search_resumes method"""
+        try:
+            # Create event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run the async search method
+            results = loop.run_until_complete(
+                self.search_resumes(
+                    query_text=query_text,
+                    job_category=job_role,
+                    limit=limit,
+                    similarity_threshold=score_threshold
+                )
+            )
+            
+            # Map the results to the expected format
+            mapped_results = []
+            for result in results:
+                mapped_result = {
+                    "resume_id": result["id"],
+                    "similarity_score": result["similarity_score"],
+                    "collection": result["collection"],
+                    "name": result["name"],
+                    "email": result["email"],
+                    "phone": result["phone"],
+                    "location": result["location"],
+                    "skills": result["skills"],
+                    "experience": result["experience"],
+                    "education": result["education"],
+                    "companies": result["companies"],
+                    "current_job_title": result.get("current_job_title", ""),
+                    "objective": result.get("objective", ""),
+                    "projects": result.get("projects", []),
+                    "certifications": result.get("certifications", []),
+                    "awards_achievements": result.get("awards_achievements", []),
+                    "languages": result.get("languages", []),
+                    "linkedin_url": result.get("linkedin_url", ""),
+                    "github_url": result.get("github_url", ""),
+                    "availability_status": result.get("availability_status", ""),
+                    "work_authorization_status": result.get("work_authorization_status", ""),
+                    "has_photo": result.get("has_photo", False),
+                    "_original_filename": result.get("_original_filename", "")
+                }
+                mapped_results.append(mapped_result)
+            
+            return mapped_results
+        except Exception as e:
+            logger.error(f"Search similar resumes failed: {e}")
+            return []
 
 # Global instance
 vector_service = VectorService()
