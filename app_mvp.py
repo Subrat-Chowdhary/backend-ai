@@ -342,63 +342,39 @@ async def upload_file_to_bucket(filename: str, content: bytes, bucket_name: str)
 @app.post("/search_profile")
 async def search_profile(
     query: str = Form(..., description="Search query or job description"),
+    job_category: Optional[str] = Form(None, description="Job category filter"),
     limit: int = Form(10, description="Maximum number of results"),
     similarity_threshold: float = Form(0.7, description="Minimum similarity score (0.0 to 1.0)")
 ):
     """
-    Proxy endpoint: Query Qdrant directly, return formatted search result
+    Search for resumes using vector similarity search
     """
     try:
-        # Qdrant external URL (can be put in env/config)
-        QDRANT_URL = "http://157.180.44.51:6333"
-        COLLECTION_NAME = "employee_profiles"  # Or 'resumes', as per your setup
-
-        # Convert query text to embedding
-        # If you want to do local embedding, do it here. (Light version may skip it!)
-        # For demo, let's say you already have embedding ready, or you use payload search
-
-        # For now, using Qdrant's payload full-scan search (for demo)
-        # Normally you would need to vectorize the query and use /search endpoint
-
-        # ----
-        # Example: Qdrant payload filter search (full scan)
-        # For real vector search, need to POST to /collections/{collection}/points/search
-        # ----
-
-        search_payload = {
-            "filter": {
-                # Optionally add any payload-based filtering here
-                # For example: "must": [{"key": "skills", "match": {"value": "python"}}]
-            },
-            "limit": limit,
-            # "with_payload": True, # Uncomment if needed
-            # "score_threshold": similarity_threshold, # If using vector search
-        }
-
-        # For real vector search, you need a vector embedding for your query!
-        # Here, only using payload scan for sample.
-        url = f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/scroll"
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=search_payload)
-            response.raise_for_status()
-            qdrant_data = response.json()
-
-        # Parse & format result
-        result_points = qdrant_data.get("result", {}).get("points", [])
-        results = []
-        for point in result_points:
-            # Qdrant returns 'id', 'payload', etc.
-            results.append({
-                "id": point.get("id"),
-                **point.get("payload", {}),
-                # add more if needed (like 'vector' if required)
-            })
-
+        logger.info(f"Search request: query='{query}', category='{job_category}', limit={limit}, threshold={similarity_threshold}")
+        
+        # Initialize vector service
+        from services.vector_service import VectorService
+        vector_service = VectorService()
+        
+        # Perform vector similarity search
+        results = await vector_service.search_resumes(
+            query_text=query,
+            job_category=job_category,
+            limit=limit,
+            similarity_threshold=similarity_threshold,
+            enhance_query=True
+        )
+        
+        logger.info(f"Vector search returned {len(results)} results")
+        
         return {
             "success": True,
             "query": query,
+            "job_category": job_category,
+            "similarity_threshold": similarity_threshold,
             "total_results": len(results),
             "results": results,
+            "search_type": "vector_similarity",
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -411,14 +387,35 @@ async def search_profile(
 async def health_check():
     try:
         from services.storage_service import storage_service
+        from services.vector_service import VectorService
+        
         minio_status = await storage_service.health_check()
+        
+        # Check vector service
+        vector_service = VectorService()
+        qdrant_status = await vector_service.health_check()
+        
+        # Check if embedding model is available
+        embedding_model_status = "available"
+        try:
+            model = await vector_service.get_embedding_model()
+            if model == "mock":
+                embedding_model_status = "mock_mode"
+        except Exception as e:
+            embedding_model_status = f"error: {str(e)}"
+        
+        overall_status = "healthy" if (minio_status and qdrant_status) else "unhealthy"
+        
         return {
-            "status": "healthy" if minio_status else "unhealthy",
+            "status": overall_status,
             "services": {
-                "minio_storage": "healthy" if minio_status else "unhealthy"
+                "minio_storage": "healthy" if minio_status else "unhealthy",
+                "qdrant_vector_db": "healthy" if qdrant_status else "unhealthy",
+                "embedding_model": embedding_model_status
             },
             "upload_service": "ready" if minio_status else "unavailable",
-            "message": "Service ready" if minio_status else "Storage unavailable",
+            "search_service": "ready" if qdrant_status else "unavailable",
+            "message": "All services ready" if overall_status == "healthy" else "Some services unavailable",
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
@@ -459,6 +456,40 @@ async def debug_buckets():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/debug/vector")
+async def debug_vector():
+    """Debug vector service status"""
+    try:
+        from services.vector_service import VectorService
+        vector_service = VectorService()
+        
+        # Get collection info
+        collection_info = await vector_service.get_collection_info()
+        
+        # Test embedding creation
+        test_embedding = await vector_service.create_embedding("test query")
+        
+        # Check health
+        health_status = await vector_service.health_check()
+        
+        return {
+            "vector_service_status": "operational" if health_status else "error",
+            "qdrant_url": vector_service.qdrant_url,
+            "collection_name": vector_service.collection_name,
+            "collection_info": collection_info,
+            "embedding_model_status": "loaded" if vector_service.embedding_model else "not_loaded",
+            "test_embedding_length": len(test_embedding),
+            "test_embedding_sample": test_embedding[:5] if test_embedding else [],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Vector debug error: {e}")
+        return {
+            "vector_service_status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 if __name__ == "__main__":
     import uvicorn
