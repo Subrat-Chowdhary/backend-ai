@@ -1,0 +1,26 @@
+services:
+  # Only include the resume-api service
+  resume-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Use the existing minio service
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      # Use the existing qdrant service
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    # Connect to the existing network
+    networks:
+      - default
+
+# Use the default network to connect to existing services
+networks:
+  default:
+    external: false

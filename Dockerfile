@@ -3,27 +3,26 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (minimal)
 RUN apt-get update && apt-get install -y \
     gcc \
-    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Copy requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Download spaCy model
-RUN python -m spacy download en_core_web_sm
+# Install Python dependencies
+RUN pip install --default-timeout=120 --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY ./app /app
+COPY app_mvp.py .
+COPY services/ ./services/
 
 # Create uploads directory
-RUN mkdir -p /uploads
+RUN mkdir -p uploads
 
 # Expose port
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application
+CMD ["python", "app_mvp.py"]

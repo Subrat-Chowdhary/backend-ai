@@ -5,6 +5,7 @@ MVP version of Resume Upload System
 """
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import List, Optional
@@ -381,6 +382,254 @@ async def search_profile(
     except Exception as e:
         logger.error(f"Search error: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@app.post("/download_selected_resumes")
+async def download_selected_resumes(
+    resume_ids: str = Form(..., description="Comma-separated list of resume IDs from search results"),
+    template: str = Form("professional", description="Template type: professional, modern, compact"),
+    filename_prefix: str = Form("Selected_Resumes", description="Prefix for the downloaded file")
+):
+    """
+    Download selected resumes as a formatted Word document
+    """
+    try:
+        from services.document_template_service import document_template_service
+        from services.vector_service import VectorService
+        
+        logger.info(f"Download request: resume_ids='{resume_ids}', template='{template}'")
+        
+        # Parse resume IDs
+        id_list = [id.strip() for id in resume_ids.split(',') if id.strip()]
+        if not id_list:
+            raise HTTPException(status_code=400, detail="No resume IDs provided")
+        
+        logger.info(f"Processing {len(id_list)} resume IDs: {id_list}")
+        
+        # Initialize vector service to get resume data
+        vector_service = VectorService()
+        
+        # Get resume data for each ID
+        selected_resumes = []
+        for resume_id in id_list:
+            try:
+                # Search for specific resume by ID
+                # Since we don't have a direct get-by-id method, we'll use a workaround
+                search_results = await vector_service.search_resumes(
+                    query_text="*",  # Broad search
+                    limit=1000,  # Large limit to get all results
+                    similarity_threshold=0.0  # Very low threshold
+                )
+                
+                # Find the specific resume by ID
+                matching_resume = None
+                for result in search_results:
+                    if result.get('id') == resume_id:
+                        matching_resume = result
+                        break
+                
+                if matching_resume:
+                    selected_resumes.append(matching_resume)
+                    logger.info(f"Found resume: {matching_resume.get('name', 'Unknown')}")
+                else:
+                    logger.warning(f"Resume with ID {resume_id} not found")
+                    
+            except Exception as e:
+                logger.error(f"Error fetching resume {resume_id}: {e}")
+                continue
+        
+        if not selected_resumes:
+            raise HTTPException(status_code=404, detail="No resumes found for the provided IDs")
+        
+        logger.info(f"Successfully retrieved {len(selected_resumes)} resumes")
+        
+        # Generate Word document
+        doc_bytes = document_template_service.generate_resume_document(
+            resumes=selected_resumes,
+            template_name=template
+        )
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename_prefix}_{template}_{timestamp}.docx"
+        
+        logger.info(f"Generated document: {filename} ({len(doc_bytes)} bytes)")
+        
+        # Return Word document as download
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": str(len(doc_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@app.post("/download_search_results")
+async def download_search_results(
+    query: str = Form(..., description="Search query used to find resumes"),
+    job_category: Optional[str] = Form(None, description="Job category filter"),
+    limit: int = Form(10, description="Maximum number of results to download"),
+    similarity_threshold: float = Form(0.7, description="Minimum similarity score"),
+    template: str = Form("professional", description="Template type: professional, modern, compact"),
+    filename_prefix: str = Form("Search_Results", description="Prefix for the downloaded file")
+):
+    """
+    Download search results as a formatted Word document
+    """
+    try:
+        from services.document_template_service import document_template_service
+        from services.vector_service import VectorService
+        
+        logger.info(f"Download search results: query='{query}', template='{template}'")
+        
+        # Initialize vector service
+        vector_service = VectorService()
+        
+        # Perform search to get results
+        search_results = await vector_service.search_resumes(
+            query_text=query,
+            job_category=job_category,
+            limit=limit,
+            similarity_threshold=similarity_threshold,
+            enhance_query=True
+        )
+        
+        if not search_results:
+            raise HTTPException(status_code=404, detail="No resumes found for the search criteria")
+        
+        logger.info(f"Found {len(search_results)} resumes for download")
+        
+        # Generate Word document
+        doc_bytes = document_template_service.generate_resume_document(
+            resumes=search_results,
+            template_name=template
+        )
+        
+        # Generate filename with timestamp and query info
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_query = "".join(c for c in query[:20] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        filename = f"{filename_prefix}_{safe_query}_{template}_{timestamp}.docx"
+        
+        logger.info(f"Generated document: {filename} ({len(doc_bytes)} bytes)")
+        
+        # Return Word document as download
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": str(len(doc_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download search results error: {e}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+
+@app.get("/templates")
+async def get_available_templates():
+    """
+    Get list of available document templates
+    """
+    try:
+        from services.document_template_service import document_template_service
+        
+        templates = document_template_service.get_available_templates()
+        
+        return {
+            "success": True,
+            "templates": templates,
+            "descriptions": {
+                "professional": "Detailed professional format with complete information",
+                "modern": "Modern two-column layout with visual appeal",
+                "compact": "Compact format with multiple resumes per page"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Template list error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get templates: {str(e)}")
+
+
+@app.post("/download_single_resume")
+async def download_single_resume(
+    resume_id: str = Form(..., description="Resume ID from search results"),
+    template: str = Form("professional", description="Template type: professional, modern, compact"),
+    filename_prefix: str = Form("Resume", description="Prefix for the downloaded file")
+):
+    """
+    Download a single resume as a formatted Word document
+    """
+    try:
+        from services.document_template_service import document_template_service
+        from services.vector_service import VectorService
+        
+        logger.info(f"Single resume download request: resume_id='{resume_id}', template='{template}'")
+        
+        if not resume_id.strip():
+            raise HTTPException(status_code=400, detail="Resume ID is required")
+        
+        # Initialize vector service to get resume data
+        vector_service = VectorService()
+        
+        # Search for specific resume by ID
+        search_results = await vector_service.search_resumes(
+            query_text="*",  # Broad search
+            limit=1000,  # Large limit to get all results
+            similarity_threshold=0.0  # Very low threshold
+        )
+        
+        # Find the specific resume by ID
+        matching_resume = None
+        for result in search_results:
+            if result.get('id') == resume_id:
+                matching_resume = result
+                break
+        
+        if not matching_resume:
+            logger.warning(f"Resume with ID {resume_id} not found")
+            raise HTTPException(status_code=404, detail=f"Resume with ID {resume_id} not found")
+        
+        logger.info(f"Found resume: {matching_resume.get('name', 'Unknown')}")
+        
+        # Generate Word document for single resume
+        doc_bytes = document_template_service.generate_resume_document(
+            resumes=[matching_resume],
+            template_name=template
+        )
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        resume_name = matching_resume.get('name', 'Resume').replace(' ', '_')
+        filename = f"{filename_prefix}_{resume_name}_{template}_{timestamp}.docx"
+        
+        logger.info(f"Generated single resume document: {filename} ({len(doc_bytes)} bytes)")
+        
+        # Return Word document as download
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": str(len(doc_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Single resume download error: {e}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
 @app.get("/health")

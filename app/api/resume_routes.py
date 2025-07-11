@@ -291,17 +291,36 @@ def search_resumes(
         for i, result in enumerate(search_results):
             # Check if this is from employee_profiles collection
             if result.get("collection") == "employee_profiles" and "name" in result:
-                # Create a Resume object from employee_profiles data
+                # Create a Resume object from employee_profiles data using exact field names
                 resume_data = {
-                    "id": result.get("resume_id"),
-                    "name": result.get("name", "Unknown"),
-                    "email": result.get("email", ""),
-                    "phone": result.get("phone", ""),
-                    "location": result.get("location", ""),
-                    "skills": ", ".join(result.get("skills", [])),
-                    "experience": result.get("experience", ""),
-                    "education": result.get("education", ""),
-                    "job_title": ", ".join(result.get("companies", []))[:100],  # Use first company as job title
+                    "id": result.get("id"),
+                    "name": result.get("name"),
+                    "email_id": result.get("email_id"),
+                    "phone_number": result.get("phone_number"),
+                    "linkedin_url": result.get("linkedin_url"),
+                    "github_url": result.get("github_url"),
+                    "location": result.get("location"),
+                    "current_job_title": result.get("current_job_title"),
+                    "objective": result.get("objective"),
+                    "skills": result.get("skills"),
+                    "qualifications_summary": result.get("qualifications_summary"),
+                    "experience_summary": result.get("experience_summary"),
+                    "companies_worked_with_duration": result.get("companies_worked_with_duration"),
+                    "certifications": result.get("certifications"),
+                    "awards_achievements": result.get("awards_achievements"),
+                    "projects": result.get("projects"),
+                    "languages": result.get("languages"),
+                    "availability_status": result.get("availability_status"),
+                    "work_authorization_status": result.get("work_authorization_status"),
+                    "has_photo": result.get("has_photo"),
+                    "_original_filename": result.get("_original_filename"),
+                    "personal_details": result.get("personal_details"),
+                    "personal_info": result.get("personal_info"),
+                    "_is_master_record": result.get("_is_master_record"),
+                    "_duplicate_group_id": result.get("_duplicate_group_id"),
+                    "_duplicate_count": result.get("_duplicate_count"),
+                    "_associated_original_filenames": result.get("_associated_original_filenames"),
+                    "_associated_ids": result.get("_associated_ids"),
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow()
                 }
@@ -310,7 +329,7 @@ def search_resumes(
                 temp_resume = Resume(**resume_data)
                 
                 result_items.append(SearchResultItem(
-                    resume_id=result.get("resume_id"),
+                    resume_id=result.get("id"),
                     resume=temp_resume,
                     similarity_score=result["similarity_score"],
                     rank_position=i + 1
@@ -362,23 +381,41 @@ def search_resumes_for_cards(
                 first_name = name_parts[0] if len(name_parts) > 0 else "Unknown"
                 last_name = name_parts[1] if len(name_parts) > 1 else ""
                 
-                # Create card directly from employee_profiles data
+                # Create card directly from employee_profiles data using exact field names
                 card_info = ResumeCardInfo(
-                    id=str(result.get("resume_id")),
+                    id=str(result.get("id")),
                     similarity_score=result["similarity_score"],
-                    first_name=first_name,
-                    last_name=last_name,
-                    full_name=result.get("name", "Unknown"),
-                    location=result.get("location", "Unknown"),
-                    total_experience=result.get("experience", ""),
-                    current_ctc="",  # Not available in employee_profiles
-                    notice_period="",  # Not available in employee_profiles
-                    job_category=result.get("current_job_title", "") or (", ".join(result.get("skills", []))[:50] if result.get("skills") else ""),
-                    skills=", ".join(result.get("skills", [])) if result.get("skills") else "",
-                    filename=result.get("_original_filename", f"{result.get('name', 'profile')}.pdf"),
-                    minio_path="",  # Not available in employee_profiles
+                    name=result.get("name"),
+                    email_id=result.get("email_id"),
+                    phone_number=result.get("phone_number"),
+                    linkedin_url=result.get("linkedin_url"),
+                    github_url=result.get("github_url"),
+                    location=result.get("location"),
+                    current_job_title=result.get("current_job_title"),
+                    objective=result.get("objective"),
+                    skills=result.get("skills"),
+                    qualifications_summary=result.get("qualifications_summary"),
+                    experience_summary=result.get("experience_summary"),
+                    companies_worked_with_duration=result.get("companies_worked_with_duration"),
+                    certifications=result.get("certifications"),
+                    awards_achievements=result.get("awards_achievements"),
+                    projects=result.get("projects"),
+                    languages=result.get("languages"),
+                    availability_status=result.get("availability_status"),
+                    work_authorization_status=result.get("work_authorization_status"),
+                    has_photo=result.get("has_photo"),
+                    _original_filename=result.get("_original_filename"),
+                    personal_details=result.get("personal_details"),
+                    personal_info=result.get("personal_info"),
+                    _is_master_record=result.get("_is_master_record"),
+                    _duplicate_group_id=result.get("_duplicate_group_id"),
+                    _duplicate_count=result.get("_duplicate_count"),
+                    _associated_original_filenames=result.get("_associated_original_filenames"),
+                    _associated_ids=result.get("_associated_ids"),
+                    filename=result.get("_original_filename"),
+                    minio_path="",
                     upload_timestamp=datetime.utcnow(),
-                    text_preview=result.get("objective", "") or (result.get("experience", "")[:200] if result.get("experience") else None)
+                    text_preview=result.get("objective")
                 )
                 card_results.append(card_info)
             else:

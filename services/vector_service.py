@@ -186,7 +186,7 @@ class VectorService:
                     response_data = response.json()
                     logger.info(f"Found {len(response_data.get('result', []))} results in {self.collection_name}")
                     
-                    # Format results
+                    # Format results - using exact field names from Qdrant payload
                     for result in response_data.get("result", []):
                         payload = result.get("payload", {})
                         results.append({
@@ -194,25 +194,33 @@ class VectorService:
                             "similarity_score": result["score"],
                             "collection": self.collection_name,
                             "name": payload.get("name", "Unknown"),
-                            "email": payload.get("email_id", ""),
-                            "phone": payload.get("phone_number", ""),
+                            "email_id": payload.get("email_id", "Unknown"),
+                            "phone_number": payload.get("phone_number", "Unknown"),
                             "location": payload.get("location", "Unknown"),
                             "skills": payload.get("skills", []),
-                            "experience": payload.get("experience_summary", ""),
-                            "education": payload.get("qualifications_summary", ""),
-                            "companies": payload.get("companies_worked_with_duration", []),
+                            "experience_summary": payload.get("experience_summary", ""),
+                            "qualifications_summary": payload.get("qualifications_summary", ""),
+                            "companies_worked_with_duration": payload.get("companies_worked_with_duration", []),
                             "current_job_title": payload.get("current_job_title", ""),
                             "objective": payload.get("objective", ""),
                             "projects": payload.get("projects", []),
                             "certifications": payload.get("certifications", []),
                             "awards_achievements": payload.get("awards_achievements", []),
                             "languages": payload.get("languages", []),
-                            "linkedin_url": payload.get("linkedin_url", ""),
-                            "github_url": payload.get("github_url", ""),
-                            "availability_status": payload.get("availability_status", ""),
-                            "work_authorization_status": payload.get("work_authorization_status", ""),
+                            "linkedin_url": payload.get("linkedin_url", "Unknown"),
+                            "github_url": payload.get("github_url", "Unknown"),
+                            "availability_status": payload.get("availability_status"),
+                            "work_authorization_status": payload.get("work_authorization_status"),
                             "has_photo": payload.get("has_photo", False),
-                            "_original_filename": payload.get("_original_filename", "")
+                            "_original_filename": payload.get("_original_filename", ""),
+                            # Additional fields from Qdrant
+                            "personal_details": payload.get("personal_details"),
+                            "personal_info": payload.get("personal_info"),
+                            "_is_master_record": payload.get("_is_master_record", False),
+                            "_duplicate_group_id": payload.get("_duplicate_group_id"),
+                            "_duplicate_count": payload.get("_duplicate_count", 0),
+                            "_associated_original_filenames": payload.get("_associated_original_filenames", []),
+                            "_associated_ids": payload.get("_associated_ids", [])
                         })
                 else:
                     logger.error(f"Error searching {self.collection_name}: {response.text}")
