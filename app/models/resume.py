@@ -1,7 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON
 from sqlalchemy.sql import func
-from app.models.database import Base
-
+from .database import Base
 
 class Resume(Base):
     __tablename__ = "resumes"
@@ -11,41 +10,53 @@ class Resume(Base):
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
     minio_path = Column(String(500), nullable=True)
-    
-    # Extracted candidate information
-    candidate_name = Column(String(255), nullable=True)
-    candidate_email = Column(String(255), nullable=True)
-    candidate_phone = Column(String(50), nullable=True)
-    
-    # Resume content
-    raw_text = Column(Text, nullable=True)
-    processed_text = Column(Text, nullable=True)
-    
-    # Job role categorization
-    job_role = Column(String(100), nullable=True)
-    job_role_confidence = Column(Float, nullable=True)
-    
-    # Skills and experience
-    skills = Column(JSON, nullable=True)  # List of extracted skills
-    experience_years = Column(Float, nullable=True)
+    file_size = Column(Integer, nullable=False)
+    file_type = Column(String(10), nullable=False)
     
     # Processing status
     is_processed = Column(Boolean, default=False)
-    processing_status = Column(String(50), default="pending")  # pending, processing, completed, failed
+    processing_status = Column(String(50), default="pending")
     error_message = Column(Text, nullable=True)
     
-    # Vector embedding info
-    embedding_id = Column(String(100), nullable=True)  # ID in Qdrant
-    embedding_collection = Column(String(100), nullable=True)  # Qdrant collection name
+    # Vector database info
+    embedding_id = Column(String(100), nullable=True)
+    embedding_collection = Column(String(100), nullable=True)
     
-    # Metadata
-    file_size = Column(Integer, nullable=True)
-    file_type = Column(String(10), nullable=True)
-    upload_timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    processed_timestamp = Column(DateTime(timezone=True), nullable=True)
+    # Job role
+    job_role = Column(String(100), nullable=True)
     
-    def __repr__(self):
-        return f"<Resume(id={self.id}, filename='{self.filename}', candidate='{self.candidate_name}')>"
+    # All fields from vector payload - using exact field names
+    name = Column(String(255), nullable=True)
+    email_id = Column(String(255), nullable=True)
+    phone_number = Column(String(50), nullable=True)
+    linkedin_url = Column(String(500), nullable=True)
+    github_url = Column(String(500), nullable=True)
+    location = Column(String(255), nullable=True)
+    current_job_title = Column(String(255), nullable=True)
+    objective = Column(Text, nullable=True)
+    skills = Column(JSON, nullable=True)
+    qualifications_summary = Column(Text, nullable=True)
+    experience_summary = Column(Text, nullable=True)
+    companies_worked_with_duration = Column(JSON, nullable=True)
+    certifications = Column(JSON, nullable=True)
+    awards_achievements = Column(JSON, nullable=True)
+    projects = Column(JSON, nullable=True)
+    languages = Column(JSON, nullable=True)
+    availability_status = Column(String(100), nullable=True)
+    work_authorization_status = Column(String(100), nullable=True)
+    has_photo = Column(Boolean, default=False)
+    personal_details = Column(Text, nullable=True)
+    personal_info = Column(Text, nullable=True)
+    _original_filename = Column(String(255), nullable=True)
+    _is_master_record = Column(Boolean, default=True)
+    _duplicate_group_id = Column(String(100), nullable=True)
+    _duplicate_count = Column(Integer, default=1)
+    _associated_original_filenames = Column(JSON, nullable=True)
+    _associated_ids = Column(JSON, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class JobDescription(Base):
@@ -55,48 +66,26 @@ class JobDescription(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     requirements = Column(Text, nullable=True)
+    job_role = Column(String(100), nullable=True)
     
-    # Job categorization
-    job_role = Column(String(100), nullable=False)
-    experience_level = Column(String(50), nullable=True)  # junior, mid, senior
-    
-    # Skills required
-    required_skills = Column(JSON, nullable=True)
-    preferred_skills = Column(JSON, nullable=True)
-    
-    # Vector embedding info
+    # Vector database info
     embedding_id = Column(String(100), nullable=True)
+    embedding_collection = Column(String(100), nullable=True)
     
-    # Metadata
-    created_by = Column(String(255), nullable=True)
-    created_timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    is_active = Column(Boolean, default=True)
-    
-    def __repr__(self):
-        return f"<JobDescription(id={self.id}, title='{self.title}', role='{self.job_role}')>"
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class SearchResult(Base):
     __tablename__ = "search_results"
     
     id = Column(Integer, primary_key=True, index=True)
-    job_description_id = Column(Integer, nullable=False)
+    query_text = Column(Text, nullable=False)
+    job_role = Column(String(100), nullable=True)
     resume_id = Column(Integer, nullable=False)
-    
-    # Matching scores
     similarity_score = Column(Float, nullable=False)
-    relevance_score = Column(Float, nullable=True)
-    
-    # Ranking information
     rank_position = Column(Integer, nullable=False)
     
-    # LLM explanation (generated on-demand)
-    explanation = Column(Text, nullable=True)
-    explanation_generated = Column(Boolean, default=False)
-    
-    # Search metadata
-    search_timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    search_query_hash = Column(String(64), nullable=True)  # Hash of search parameters
-    
-    def __repr__(self):
-        return f"<SearchResult(job_id={self.job_description_id}, resume_id={self.resume_id}, score={self.similarity_score})>"
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

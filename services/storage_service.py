@@ -24,10 +24,18 @@ class StorageService:
             secure=False
         )
     
+    async def bucket_exists(self, bucket_name: str) -> bool:
+        """Check if bucket exists"""
+        try:
+            return self.client.bucket_exists(bucket_name)
+        except S3Error as e:
+            logger.error(f"Error checking bucket {bucket_name}: {e}")
+            return False
+    
     async def create_bucket_if_not_exists(self, bucket_name: str) -> bool:
         """Create bucket if it doesn't exist"""
         try:
-            if not self.client.bucket_exists(bucket_name):
+            if not await self.bucket_exists(bucket_name):
                 self.client.make_bucket(bucket_name)
                 logger.info(f"Created bucket: {bucket_name}")
             return True
@@ -73,6 +81,15 @@ class StorageService:
             return [obj.object_name for obj in objects]
         except S3Error as e:
             logger.error(f"Error listing files in MinIO: {e}")
+            return []
+    
+    async def list_all_buckets(self) -> list:
+        """List all buckets"""
+        try:
+            buckets = self.client.list_buckets()
+            return [bucket.name for bucket in buckets]
+        except S3Error as e:
+            logger.error(f"Error listing buckets in MinIO: {e}")
             return []
     
     async def health_check(self) -> bool:

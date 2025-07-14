@@ -14,7 +14,8 @@ from app.schemas.resume import (
     ProcessingStatus,
     SearchRequest,
     SearchResponse,
-    SearchResultItem
+    SearchResultItem,
+    ResumeCardInfo
 )
 from app.services.file_service import file_service
 from app.services.vector_service import vector_service
@@ -285,17 +286,64 @@ def search_resumes(
             score_threshold=search_request.similarity_threshold
         )
         
-        # Get resume details from database
+        # Get resume details from database or create from employee_profiles data
         result_items = []
         for i, result in enumerate(search_results):
-            resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
-            if resume:
+            # Check if this is from employee_profiles collection
+            if result.get("collection") == "employee_profiles" and "name" in result:
+                # Create a Resume object from employee_profiles data using exact field names
+                resume_data = {
+                    "id": result.get("id"),
+                    "name": result.get("name"),
+                    "email_id": result.get("email_id"),
+                    "phone_number": result.get("phone_number"),
+                    "linkedin_url": result.get("linkedin_url"),
+                    "github_url": result.get("github_url"),
+                    "location": result.get("location"),
+                    "current_job_title": result.get("current_job_title"),
+                    "objective": result.get("objective"),
+                    "skills": result.get("skills"),
+                    "qualifications_summary": result.get("qualifications_summary"),
+                    "experience_summary": result.get("experience_summary"),
+                    "companies_worked_with_duration": result.get("companies_worked_with_duration"),
+                    "certifications": result.get("certifications"),
+                    "awards_achievements": result.get("awards_achievements"),
+                    "projects": result.get("projects"),
+                    "languages": result.get("languages"),
+                    "availability_status": result.get("availability_status"),
+                    "work_authorization_status": result.get("work_authorization_status"),
+                    "has_photo": result.get("has_photo"),
+                    "_original_filename": result.get("_original_filename"),
+                    "personal_details": result.get("personal_details"),
+                    "personal_info": result.get("personal_info"),
+                    "_is_master_record": result.get("_is_master_record"),
+                    "_duplicate_group_id": result.get("_duplicate_group_id"),
+                    "_duplicate_count": result.get("_duplicate_count"),
+                    "_associated_original_filenames": result.get("_associated_original_filenames"),
+                    "_associated_ids": result.get("_associated_ids"),
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                
+                # Create a Resume object (without saving to DB)
+                temp_resume = Resume(**resume_data)
+                
                 result_items.append(SearchResultItem(
-                    resume_id=resume.id,
-                    resume=resume,
+                    resume_id=result.get("id"),
+                    resume=temp_resume,
                     similarity_score=result["similarity_score"],
                     rank_position=i + 1
                 ))
+            else:
+                # Traditional resume lookup from database
+                resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
+                if resume:
+                    result_items.append(SearchResultItem(
+                        resume_id=resume.id,
+                        resume=resume,
+                        similarity_score=result["similarity_score"],
+                        rank_position=i + 1
+                    ))
         
         return SearchResponse(
             query=search_request,
@@ -303,6 +351,98 @@ def search_resumes(
             total_results=len(result_items),
             search_timestamp=datetime.utcnow()
         )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search/cards", response_model=List[ResumeCardInfo])
+def search_resumes_for_cards(
+    search_request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    """Search for matching resumes and return card-friendly format"""
+    try:
+        # Perform vector search
+        search_results = vector_service.search_similar_resumes(
+            query_text=search_request.job_description,
+            job_role=search_request.job_role,
+            limit=search_request.limit,
+            score_threshold=search_request.similarity_threshold
+        )
+        
+        # Get resume details from database and format for cards
+        card_results = []
+        for result in search_results:
+            # Check if this is from employee_profiles collection
+            if result.get("collection") == "employee_profiles" and "name" in result:
+                # Extract first and last name
+                name_parts = result.get("name", "Unknown").split(" ", 1)
+                first_name = name_parts[0] if len(name_parts) > 0 else "Unknown"
+                last_name = name_parts[1] if len(name_parts) > 1 else ""
+                
+                # Create card directly from employee_profiles data using exact field names
+                card_info = ResumeCardInfo(
+                    id=str(result.get("id")),
+                    similarity_score=result["similarity_score"],
+                    name=result.get("name"),
+                    email_id=result.get("email_id"),
+                    phone_number=result.get("phone_number"),
+                    linkedin_url=result.get("linkedin_url"),
+                    github_url=result.get("github_url"),
+                    location=result.get("location"),
+                    current_job_title=result.get("current_job_title"),
+                    objective=result.get("objective"),
+                    skills=result.get("skills"),
+                    qualifications_summary=result.get("qualifications_summary"),
+                    experience_summary=result.get("experience_summary"),
+                    companies_worked_with_duration=result.get("companies_worked_with_duration"),
+                    certifications=result.get("certifications"),
+                    awards_achievements=result.get("awards_achievements"),
+                    projects=result.get("projects"),
+                    languages=result.get("languages"),
+                    availability_status=result.get("availability_status"),
+                    work_authorization_status=result.get("work_authorization_status"),
+                    has_photo=result.get("has_photo"),
+                    _original_filename=result.get("_original_filename"),
+                    personal_details=result.get("personal_details"),
+                    personal_info=result.get("personal_info"),
+                    _is_master_record=result.get("_is_master_record"),
+                    _duplicate_group_id=result.get("_duplicate_group_id"),
+                    _duplicate_count=result.get("_duplicate_count"),
+                    _associated_original_filenames=result.get("_associated_original_filenames"),
+                    _associated_ids=result.get("_associated_ids"),
+                    filename=result.get("_original_filename"),
+                    minio_path="",
+                    upload_timestamp=datetime.utcnow(),
+                    text_preview=result.get("objective")
+                )
+                card_results.append(card_info)
+            else:
+                # Traditional resume lookup from database
+                resume = db.query(Resume).filter(Resume.id == result["resume_id"]).first()
+                if resume:
+                    # Create card-friendly response
+                    card_info = ResumeCardInfo(
+                        id=str(resume.id),
+                        similarity_score=result["similarity_score"],
+                        first_name=resume.candidate_first_name,
+                        last_name=resume.candidate_last_name,
+                        full_name=resume.candidate_name,
+                        location=resume.candidate_location,
+                        total_experience=resume.total_experience,
+                        current_ctc=resume.current_ctc,
+                        notice_period=resume.notice_period,
+                        job_category=resume.job_role,
+                        skills=resume.skills,
+                        filename=resume.filename,
+                        minio_path=resume.minio_path,
+                        upload_timestamp=resume.upload_timestamp,
+                        text_preview=resume.processed_text[:200] if resume.processed_text else None
+                    )
+                    card_results.append(card_info)
+        
+        return card_results
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

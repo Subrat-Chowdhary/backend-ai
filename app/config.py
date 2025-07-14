@@ -11,13 +11,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:password@localhost:5432/resume_db"
     
     # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://157.180.44.51:6379/0"
     
     # Qdrant Vector Database
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = "http://157.180.44.51:6333"
     
     # MinIO Object Storage
-    minio_endpoint: str = "localhost:9000"
+    minio_endpoint: str = "157.180.44.51:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket_name: str = "resumes"
@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     
     # Job Role Categories
     job_roles: str = "Backend,Frontend,Database,QA,Fullstack,DevOps,Mobile,DataScience"
+    
+    # Query Enhancement Settings
+    query_enhancement_strategy: str = "none"  # none, openai, anthropic, local_llm, custom_api
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    custom_enhancer_url: str = ""
     
     class Config:
         env_file = ".env"

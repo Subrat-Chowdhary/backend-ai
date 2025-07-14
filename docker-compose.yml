@@ -1,89 +1,48 @@
-version: "3.8"
-
 services:
-  # FastAPI Application
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/resume_db
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    depends_on:
-      - postgres
-      - redis
-      - qdrant
-      - minio
-    volumes:
-      - ./app:/app
-      - ./uploads:/uploads
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  # Celery Worker
-  celery-worker:
-    build: .
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/resume_db
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    depends_on:
-      - postgres
-      - redis
-      - qdrant
-      - minio
-    volumes:
-      - ./app:/app
-      - ./uploads:/uploads
-    command: celery -A app.celery_app worker --loglevel=info
-
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=resume_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  # Redis for Celery
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  # Qdrant Vector Database
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-  # MinIO Object Storage
+  # MinIO for file storage
   minio:
     image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
     volumes:
       - minio_data:/data
-    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Lightweight Resume API
+  resume-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.light
+    ports:
+      - "8000:8000"
+    depends_on:
+      - minio
+    environment:
+      # External services (your ETL server)
+      - QDRANT_URL=http://157.180.44.51:6333
+      
+      # Local MinIO
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      
+      # Query Enhancement (configurable)
+      - QUERY_ENHANCEMENT_STRATEGY=none  # Change to: openai, anthropic, custom_api
+      - OPENAI_API_KEY=  # Add your key if using OpenAI
+      - ANTHROPIC_API_KEY=  # Add your key if using Anthropic
+      - CUSTOM_ENHANCER_URL=  # Add your custom API URL
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
-  qdrant_data:
   minio_data:
