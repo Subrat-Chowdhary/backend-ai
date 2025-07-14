@@ -13,7 +13,7 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --default-timeout=120 --no-cache-dir -r requirements.txt
-
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('all-MiniLM-L6-v2'); CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 # Copy application code
 COPY app_mvp.py .
 COPY services/ ./services/

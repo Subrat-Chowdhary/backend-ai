@@ -1,17 +1,39 @@
 services:
-  # Only include the resume-api service
+  # Qdrant vector database with existing data
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - backend-ai_qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - default
+
+  # Resume API service
   resume-api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    depends_on:
+      - minio
+      - qdrant
     environment:
       # Use the existing minio service
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
-      # Use the existing qdrant service
+      # Use the local qdrant service
       - QDRANT_URL=http://qdrant:6333
     volumes:
       - ./uploads:/app/uploads
@@ -24,3 +46,8 @@ services:
 networks:
   default:
     external: false
+
+# Reference to existing Qdrant volume with data
+volumes:
+  backend-ai_qdrant_data:
+    external: true
