@@ -28,7 +28,7 @@ services:
       - minio
     environment:
       # External services (your ETL server)
-      - QDRANT_URL=http://157.180.44.51:6333
+      - QDRANT_URL=https://air.atwpl.com/qdrant
       
       # Local MinIO
       - MINIO_ENDPOINT=minio:9000
