@@ -443,6 +443,19 @@ async def download_selected_resumes(
         
         logger.info(f"Successfully retrieved {len(selected_resumes)} resumes")
         
+
+        # Hardcoded flags for visibility control
+        for r in selected_resumes:
+            r["visibility_flags"] = {
+                "show_email": True,
+                "show_phone": False,
+                "show_location": True,
+                "show_company": False
+            }
+            r["override_email"] = "hr@ahomtech.com"
+            r["override_phone"] = "9876543210"
+
+
         # Generate Word document
         doc_bytes = document_template_service.generate_resume_document(
             resumes=selected_resumes,
@@ -507,6 +520,18 @@ async def download_search_results(
         
         logger.info(f"Found {len(search_results)} resumes for download")
         
+
+                # Hardcoded flags for visibility control
+        for r in selected_resumes:
+            r["visibility_flags"] = {
+                "show_email": True,
+                "show_phone": False,
+                "show_location": True,
+                "show_company": False
+            }
+            r["override_email"] = "hr@ahomtech.com"
+            r["override_phone"] = "9876543210"
+
         # Generate Word document
         doc_bytes = document_template_service.generate_resume_document(
             resumes=search_results,
@@ -602,6 +627,17 @@ async def download_single_resume(
         
         logger.info(f"Found resume: {matching_resume.get('name', 'Unknown')}")
         
+        # Hardcoded flags for visibility control
+        for r in selected_resumes:
+            r["visibility_flags"] = {
+                "show_email": True,
+                "show_phone": False,
+                "show_location": True,
+                "show_company": False
+            }
+            r["override_email"] = "hr@ahomtech.com"
+            r["override_phone"] = "9876543210"
+
         # Generate Word document for single resume
         doc_bytes = document_template_service.generate_resume_document(
             resumes=[matching_resume],

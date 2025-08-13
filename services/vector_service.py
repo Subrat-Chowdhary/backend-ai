@@ -1,6 +1,6 @@
 """
 Vector Service for MVP
-Handles embeddings, dense search, and re-ranking using Qdrant and Cross-Encoder.
+Handles embeddings, dense search and sparse(BM25), and re-ranking using Qdrant and Cross-Encoder.
 """
 import logging
 import httpx
@@ -10,6 +10,8 @@ from typing import List, Dict, Optional
 import asyncio
 import os
 import numpy as np # Import numpy
+from .storage_service import storage_service
+import re
 
 # Conditional imports for sentence-transformers and CrossEncoder
 try:
@@ -135,23 +137,15 @@ class VectorService:
             raise Exception(f"Vector DB error: {str(e)}")
 
     async def search_resumes(self, query_text: str, job_category: Optional[str] = None, 
-                           limit: int = 10, similarity_threshold: float = 0.7, # Threshold for initial retrieval
-                           initial_retrieval_limit: int = 40, # MODIFIED: Default changed to 40
+                           limit: int = 10, similarity_threshold: float = 0.7,
+                           initial_retrieval_limit: int = 40,
                            enhance_query: bool = True) -> List[Dict]:
-        """
-        Search for similar resumes in employee_profiles collection using dense search and re-ranking.
-        `limit` refers to the final number of results after re-ranking.
-        `initial_retrieval_limit` is the number of candidates fetched from Qdrant for re-ranking.
-        """
         try:
             logger.info(f"Search request: query='{query_text}', category='{job_category}', final_limit={limit}, initial_limit={initial_retrieval_limit}, threshold={similarity_threshold}")
             
-            # Enhance query if enabled
             final_query = query_text
             if enhance_query:
                 try:
-                    # Assuming query_enhancer is in the same package or accessible
-                    # Note: This import might need adjustment based on your project structure
                     from .query_enhancer import enhance_search_query
                     context = {"job_category": job_category} if job_category else None
                     final_query = await enhance_search_query(query_text, context)
@@ -161,21 +155,41 @@ class VectorService:
                     logger.info("Query enhancer not available, using original query.")
                 except Exception as e:
                     logger.warning(f"Query enhancement failed: {e}, using original query.")
-            
-            # Create dense query embedding
+
             dense_query_embedding = await self.create_dense_embedding(final_query)
             logger.info(f"Dense query embedding created, length: {len(dense_query_embedding)}")
-            
-            # Prepare dense search request for Qdrant
+
+            # ------------------ Load sparse model via storage service ------------------
+        
+            bm25_model, token_to_index = await storage_service.load_sparse_models(
+                "vector-service-models", "bm25_model.pkl", "token_to_index.json"
+            )
+
+            query_tokens = re.findall(r'\b\w+\b', final_query.lower())
+            bm25_scores = bm25_model.get_scores(query_tokens)
+
+            sparse_indices = []
+            sparse_values = []
+            for token, score in zip(query_tokens, bm25_scores):
+                if token in token_to_index:
+                    sparse_indices.append(token_to_index[token])
+                    sparse_values.append(float(score))
+
             search_request = {
-                "vector": dense_query_embedding,
-                "limit": initial_retrieval_limit, # Fetch more candidates for re-ranking
-                "score_threshold": similarity_threshold, # Apply threshold for initial dense retrieval
+                "vector": {
+                    "name": "dense",  # refers to vector name in collection config
+                    "vector": dense_query_embedding
+                },
+                "sparse_vector": {
+                    "indices": sparse_indices,
+                    "values": sparse_values
+                },
+                "limit": initial_retrieval_limit,
+                "score_threshold": similarity_threshold,
                 "with_payload": True,
                 "with_vector": False
             }
-            
-            # Add filter for job category if specified
+
             if job_category:
                 search_request["filter"] = {
                     "must": [
@@ -187,9 +201,9 @@ class VectorService:
                         }
                     ]
                 }
-            
+
             logger.info(f"Qdrant search request payload: {json.dumps(search_request, indent=2)}")
-            
+
             initial_qdrant_results = []
             async with httpx.AsyncClient() as client:
                 logger.info(f"Searching in {self.collection_name} collection with initial limit {initial_retrieval_limit}")
@@ -197,21 +211,13 @@ class VectorService:
                     f"{self.qdrant_url}/collections/{self.collection_name}/points/search",
                     json=search_request
                 )
-                
                 if response.status_code == 200:
                     response_data = response.json()
-                    # Log the raw Qdrant response data for debugging
                     logger.debug(f"Raw Qdrant response data: {json.dumps(response_data, indent=2)}")
                     initial_qdrant_results = response_data.get("result", [])
-                    
                     logger.info(f"Found {len(initial_qdrant_results)} initial results from Qdrant.")
-                    logger.debug(f"Type of initial_qdrant_results: {type(initial_qdrant_results)}")
-                    if initial_qdrant_results:
-                        logger.debug(f"Type of first element in initial_qdrant_results: {type(initial_qdrant_results[0])}")
-                        logger.debug(f"First element in initial_qdrant_results: {initial_qdrant_results[0]}")
                 else:
                     logger.error(f"Error searching {self.collection_name}: {response.text}")
-                    # Fallback to empty results if Qdrant search fails
                     return []
 
             final_results = []
@@ -220,85 +226,61 @@ class VectorService:
             if reranker and initial_qdrant_results:
                 logger.info("Performing re-ranking with Cross-Encoder...")
                 rerank_pairs = []
-                valid_initial_qdrant_results = [] # To store only valid dict results for re-ranking
+                valid_initial_qdrant_results = []
                 for result in initial_qdrant_results:
-                    # Defensive check: Ensure 'result' is a dictionary before processing
                     if not isinstance(result, dict):
-                        logger.error(f"Unexpected item type in initial_qdrant_results: Expected dict, got {type(result)}. Skipping item: {result}")
-                        continue # Skip this malformed item
-                    
-                    valid_initial_qdrant_results.append(result) # Add to valid list
+                        logger.error(f"Unexpected item type in initial_qdrant_results: {type(result)}. Skipping.")
+                        continue
+                    valid_initial_qdrant_results.append(result)
                     payload = result.get("payload", {})
-                    
-                    # Handle 'projects' as a list of strings
+
                     projects_list_for_reranker = []
                     projects_data = payload.get('projects', [])
                     if isinstance(projects_data, list):
                         for p_item in projects_data:
                             if isinstance(p_item, str):
                                 projects_list_for_reranker.append(p_item)
-                            else:
-                                logger.warning(f"Unexpected item type in 'projects' list: Expected str, got {type(p_item)}. Skipping item: {p_item}")
-                    else:
-                        logger.warning(f"Unexpected type for 'projects' payload: Expected list, got {type(projects_data)}. Using empty list.")
-                    
                     doc_text = f"Title: {payload.get('current_job_title', '')}. " \
                                f"Skills: {', '.join(payload.get('skills', []))}. " \
                                f"Experience: {payload.get('experience_summary', '')}. " \
                                f"Objective: {payload.get('objective', '')}. " \
                                f"Qualifications: {payload.get('qualifications_summary', '')}. " \
                                f"Projects: {', '.join(projects_list_for_reranker)}. " \
-                               f"Location: {payload.get('location', '')}." # Added location
+                               f"Location: {payload.get('location', '')}."
                     rerank_pairs.append((final_query, doc_text))
-                
-                # Only proceed with prediction if rerank_pairs is not empty
+
                 if rerank_pairs:
                     scores = reranker.predict(rerank_pairs)
-
-                    # Combine scores with original valid results and sort
-                    # Ensure scores length matches valid_initial_qdrant_results length
                     if len(scores) == len(valid_initial_qdrant_results):
                         scored_results = sorted(zip(scores, valid_initial_qdrant_results), key=lambda x: x[0], reverse=True)
-                        logger.info(f"Re-ranking complete. Top score: {scored_results[0][0]:.4f}" if scored_results else "No scored results after re-ranking.")
-                        final_results_for_mapping = [item[1] for item in scored_results[:limit]] # 'limit' determines final count
+                        final_results_for_mapping = [item[1] for item in scored_results[:limit]]
                     else:
-                        logger.error(f"Mismatch between reranker scores ({len(scores)}) and valid initial Qdrant results ({len(valid_initial_qdrant_results)}). Returning top Qdrant results without re-ranking.")
+                        logger.error("Mismatch between reranker scores and initial results.")
                         final_results_for_mapping = valid_initial_qdrant_results[:limit]
                 else:
-                    logger.warning("No valid items for re-ranking after filtering. Returning top Qdrant results without re-ranking.")
-                    final_results_for_mapping = valid_initial_qdrant_results[:limit] # Use the filtered valid results
+                    final_results_for_mapping = valid_initial_qdrant_results[:limit]
             else:
-                logger.warning("Cross-Encoder reranker not available or no initial results. Returning top Qdrant results without re-ranking.")
-                # If no reranker, just take the top 'limit' results from initial Qdrant results, ensuring they are dicts
+                logger.warning("Skipping reranking.")
                 final_results_for_mapping = [r for r in initial_qdrant_results if isinstance(r, dict)][:limit]
-            
-            # Format and map the final results to the expected output structure
+
             results_to_return = []
             for result in final_results_for_mapping:
-                # Another defensive check, though less likely to hit here if previous filtering works
                 if not isinstance(result, dict):
-                    logger.error(f"Unexpected item type in final_results_for_mapping: Expected dict, got {type(result)}. Skipping item: {result}")
                     continue
-                
                 payload = result.get("payload", {})
-                # Use the re-ranker score if available, otherwise Qdrant score
-                # Find the re-ranker score for the current result if it was re-ranked
                 reranker_score = None
-                if 'scored_results' in locals() and scored_results: # Check if scored_results was populated
+                if 'scored_results' in locals():
                     for s, r in scored_results:
                         if r.get('id') == result.get('id'):
                             reranker_score = s
                             break
-
                 similarity_score = reranker_score if reranker_score is not None else result.get("score", 0.0)
-                
-                # --- MODIFIED: Convert numpy.float32 to standard float ---
                 if isinstance(similarity_score, np.float32):
                     similarity_score = float(similarity_score)
 
                 results_to_return.append({
                     "id": result["id"],
-                    "similarity_score": similarity_score, # Use re-ranker score or Qdrant score
+                    "similarity_score": similarity_score,
                     "collection": self.collection_name,
                     "name": payload.get("name", "Unknown"),
                     "email_id": payload.get("email_id", "Unknown"),
@@ -310,7 +292,7 @@ class VectorService:
                     "companies_worked_with_duration": payload.get("companies_worked_with_duration", []),
                     "current_job_title": payload.get("current_job_title", ""),
                     "objective": payload.get("objective", ""),
-                    "projects": payload.get("projects", []), # Keep original projects list in final output
+                    "projects": payload.get("projects", []),
                     "certifications": payload.get("certifications", []),
                     "awards_achievements": payload.get("awards_achievements", []),
                     "languages": payload.get("languages", []),
@@ -328,60 +310,13 @@ class VectorService:
                     "_associated_original_filenames": payload.get("_associated_original_filenames", []),
                     "_associated_ids": payload.get("_associated_ids", [])
                 })
-            
             logger.info(f"Returning {len(results_to_return)} final results after re-ranking.")
             return results_to_return
-        
-        except Exception as e:
-            logger.error(f"Search failed: {e}", exc_info=True) # Log full traceback
-            return []
-    
-    async def force_indexing(self) -> bool:
-        """Force immediate indexing by updating optimizer config."""
-        try:
-            async with httpx.AsyncClient() as client:
-                update_config = {
-                    "optimizer_config": {
-                        "indexing_threshold": 0  # Force immediate indexing
-                    }
-                }
-                response = await client.patch(
-                    f"{self.qdrant_url}/collections/{self.collection_name}",
-                    json=update_config
-                )
-                logger.info(f"Force indexing response: {response.status_code}, {response.text}")
-                return response.status_code == 200
-        except Exception as e:
-            logger.error(f"Force indexing failed: {e}")
-            return False
 
-    async def rebuild_index(self) -> bool:
-        """Rebuild Qdrant index."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.qdrant_url}/collections/{self.collection_name}/index",
-                    json={"wait": True}
-                )
-                logger.info(f"Index rebuild response: {response.status_code}")
-                return response.status_code == 200
         except Exception as e:
-            logger.error(f"Index rebuild failed: {e}")
-            return False
-    
-    async def get_collection_info(self) -> dict:
-        """Get collection information."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.qdrant_url}/collections/{self.collection_name}")
-                if response.status_code == 200:
-                    info = response.json()
-                    logger.info(f"Collection info: {info}")
-                    return info
-                return {}
-        except Exception as e:
-            logger.error(f"Failed to get collection info: {e}")
-            return {}
+            logger.error(f"Search failed: {e}", exc_info=True)
+            return []
+
 
     async def health_check(self) -> bool:
         """Check Qdrant health."""
